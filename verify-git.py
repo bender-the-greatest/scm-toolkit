@@ -14,7 +14,7 @@ __should_gc = False
 
 
 # Functions
-def verify_repository(repo_path, should_gc=__should_gc):
+def verify_repository(repo_path, should_gc=False):
     # Set vars
     global __verbose
     old_dir = os.getcwd()
@@ -130,7 +130,7 @@ def __main():
         print()
         print("Verifying {}...".format(repo_name))
         full_path = os.path.join(__repo_dir, repo_name)
-        if verify_repository(full_path):
+        if verify_repository(full_path, __should_gc):
             print("{} verified successfully!".format(repo_name), file=sys.stdout)
         else:
             print("{} failed to verify.".format(repo_name), file=sys.stderr)
