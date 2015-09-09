@@ -5,49 +5,84 @@ from time import sleep
 import argparse
 
 # Bin paths
-svnadmin_bin = '/usr/bin/svnadmin'
+git_bin = '/usr/bin/git'
 
 # Global vars
 __verbose = False
-__repo_dir = '/repositories/svn'
+__repo_dir = '/repositories/git'
+__should_gc = False
 
 
 # Functions
-def verify_repository(repo_path):
+def verify_repository(repo_path, should_gc=__should_gc):
+    # Set vars
     global __verbose
-
-    # Since Python reads the buffer slower than it fills up, we deadlock and the program won't finish in a timely manner
-    # Throw the output away because of this.
+    old_dir = os.getcwd()
     nullpipe = open(os.devnull, "w")
-    p = Popen([svnadmin_bin,
-               'verify',
-               repo_path], stdout=nullpipe, stderr=nullpipe)
+
+    # Change to the repository path
+    try:
+        os.chdir(repo_path)
+    except FileNotFoundError as err:
+        print("Error: The repository path {} does not exist!".format(repo_path), file=sys.stderr)
+        os.chdir(old_dir)
+        return False
+    except NotADirectoryError as err2:
+        print("Error: The repository path {} is not a directory".format(repo_path), file=sys.stderr)
+        os.chdir(old_dir)
+        return False
+
+    # Run git gc (don't stop if it fails, because 'git gc' may return a non-zero on a warning
+    # and is rather undocumented)
+    if should_gc:
+        print("Running 'git gc'. Even if this fails, the integrity check will still continue.", file=sys.stdout)
+        p = Popen([git_bin,
+                   'gc'], stdout=nullpipe, stderr=nullpipe)
+        p.wait()
+        if not p.returncode == 0:
+            print(
+                "Git gc failed with return code {}. It is recommended to run 'git gc' manually"
+                " to check the output.".format(p.returncode), file=sys.stderr)
+        else:
+            print("Git gc completed successfully!", file=sys.stdout)
+        print("Continuing with integrity check of repository.", file=sys.stdout)
+    # Run git fsck
+    p = Popen([git_bin,
+               'fsck'], stdout=nullpipe, stderr=nullpipe)
     p.wait()
     if not p.returncode == 0:
-        print("Svnadmin verify failed with return code {}".format(p.returncode), file=sys.stderr)
+        print("Git fsck failed with return code {}.".format(p.returncode), file=sys.stderr)
+        os.chdir(old_dir)
         return False
+    print("Git fsck completed successfully!", file=sys.stdout)
+    os.chdir(old_dir)
     return True
 
 
 def parse_args():
     global __verbose
     global __repo_dir
-    global svnadmin_bin
+    global git_bin
+    global __should_gc
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-v', '--verbose', dest='verbose', action='store_true', default=False,
                         help='Display more verbose output.')
     parser.add_argument('-d', '--directory', dest='directory', type=str, default=__repo_dir,
                         help='Path to the repositories directory.')
-    parser.add_argument('-b', '--svnadmin', dest='svnadmin_bin', type=str, default=svnadmin_bin)
+    parser.add_argument('-b', '--git', dest='git_bin', type=str, default=git_bin,
+                        help='Path to the git binary.')
+    parser.add_argument('-gc', '--garbage-collect', dest='gc', action='store_true', default=False,
+                        help='If set, "git gc" will be run prior to any integrity checks.')
     args = parser.parse_args()
     # Set verbose flag
-
     __verbose = args.verbose
     # Set repo dir
     __repo_dir = args.directory
-    # Set svnadmin bin
-    svnadmin_bin = args.svnadmin_bin
+    # Set git bin
+    git_bin = args.git_bin
+    # Set GC flag
+    __should_gc = args.gc
 
 
 def process_output(file):
@@ -68,8 +103,8 @@ def get_repository_list(dir_path):
 
 def check_paths():
     global __repo_dir
-    if not os.path.exists(svnadmin_bin):
-        return "Can't find svnadmin binary at {}.".format(svnadmin_bin)
+    if not os.path.exists(git_bin):
+        return "Can't find git binary at {}.".format(git_bin)
     if not os.path.exists(__repo_dir):
         return "Repository directory path does not exist at {}".format(__repo_dir)
     return None
@@ -93,10 +128,10 @@ def __main():
     print("Beginning repository verification process...")
     for repo_name in repo_list:
         print()
-        print("Verifying {}".format(repo_name))
+        print("Verifying {}...".format(repo_name))
         full_path = os.path.join(__repo_dir, repo_name)
         if verify_repository(full_path):
-            print("{} verified successfully!".format(repo_name))
+            print("{} verified successfully!".format(repo_name), file=sys.stdout)
         else:
             print("{} failed to verify.".format(repo_name), file=sys.stderr)
     return 0
